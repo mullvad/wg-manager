@@ -1,0 +1,29 @@
+language: go
+sudo: required
+dist: xenial
+
+go:
+  - 1.x
+env:
+- GO111MODULE=on
+script:
+  - make
+  # Install wireguard
+  - sudo apt-get -y install software-properties-common
+  - sudo add-apt-repository -y ppa:wireguard/wireguard
+  - sudo apt-get --allow-unauthenticated -y update
+  - sudo apt-get --allow-unauthenticated -y install linux-headers-$(uname -r) wireguard-dkms
+  - sudo ip link add wg0 type wireguard
+  - sudo ip link set up wg0
+  # Set up iptables
+  - sudo iptables -t nat -N PORTFORWARDING
+  - sudo ip6tables -t nat -N PORTFORWARDING
+  # Build tests
+  - go test -c ./portforward && go test -c ./wireguard
+  # Run tests
+  - sudo ./portforward.test -test.v && sudo ./wireguard.test -test.v
+
+notifications:
+  email:
+    on_success: never
+    on_failure: never
