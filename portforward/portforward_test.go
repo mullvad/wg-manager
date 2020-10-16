@@ -25,17 +25,17 @@ var apiFixture = api.WireguardPeerList{
 }
 
 var rulesFixture = []string{
-	"-A PORTFORWARDING -p tcp -m set --match-set PORTFORWARDING_IPV4 dst -m multiport --dports 1234,4321 -j DNAT --to-destination 10.99.0.1",
-	"-A PORTFORWARDING -p udp -m set --match-set PORTFORWARDING_IPV4 dst -m multiport --dports 1234,4321 -j DNAT --to-destination 10.99.0.1",
-	"-A PORTFORWARDING -p tcp -m set --match-set PORTFORWARDING_IPV6 dst -m multiport --dports 1234,4321 -j DNAT --to-destination fc00:bbbb:bbbb:bb01::1",
-	"-A PORTFORWARDING -p udp -m set --match-set PORTFORWARDING_IPV6 dst -m multiport --dports 1234,4321 -j DNAT --to-destination fc00:bbbb:bbbb:bb01::1",
+	"-A PORTFORWARDING_TCP -p tcp -m set --match-set PORTFORWARDING_IPV4 dst -m multiport --dports 1234,4321 -j DNAT --to-destination 10.99.0.1",
+	"-A PORTFORWARDING_UDP -p udp -m set --match-set PORTFORWARDING_IPV4 dst -m multiport --dports 1234,4321 -j DNAT --to-destination 10.99.0.1",
+	"-A PORTFORWARDING_TCP -p tcp -m set --match-set PORTFORWARDING_IPV6 dst -m multiport --dports 1234,4321 -j DNAT --to-destination fc00:bbbb:bbbb:bb01::1",
+	"-A PORTFORWARDING_UDP -p udp -m set --match-set PORTFORWARDING_IPV6 dst -m multiport --dports 1234,4321 -j DNAT --to-destination fc00:bbbb:bbbb:bb01::1",
 }
 
 const (
-	chain     = "PORTFORWARDING"
-	ipsetIPv4 = "PORTFORWARDING_IPV4"
-	ipsetIPv6 = "PORTFORWARDING_IPV6"
-	table     = "nat"
+	chainPrefix = "PORTFORWARDING"
+	ipsetIPv4   = "PORTFORWARDING_IPV4"
+	ipsetIPv6   = "PORTFORWARDING_IPV6"
+	table       = "nat"
 )
 
 func TestPortforward(t *testing.T) {
@@ -43,7 +43,7 @@ func TestPortforward(t *testing.T) {
 		t.Skip("skipping integration tests")
 	}
 
-	pf, err := portforward.New(chain, ipsetIPv4, ipsetIPv6)
+	pf, err := portforward.New(chainPrefix, ipsetIPv4, ipsetIPv6)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,17 +96,20 @@ func getRules(t *testing.T, ipts []*iptables.IPTables) []string {
 
 	rules := []string{}
 	for _, ipt := range ipts {
-		listRules, err := ipt.List(table, chain)
-		if err != nil {
-			t.Fatal(err)
-		}
+		// TODO: Find less ugly solution for this!
+		for _, c := range []string{chainPrefix + "_" + "TCP", chainPrefix + "_" + "UDP"} {
+			listRules, err := ipt.List(table, c)
+			if err != nil {
+				t.Fatal(err)
+			}
 
-		if len(listRules) > 0 {
-			listRules = listRules[1:]
-		}
+			if len(listRules) > 0 {
+				listRules = listRules[1:]
+			}
 
-		for _, rule := range listRules {
-			rules = append(rules, rule)
+			for _, rule := range listRules {
+				rules = append(rules, rule)
+			}
 		}
 	}
 
@@ -141,7 +144,7 @@ func TestInvalidChain(t *testing.T) {
 }
 
 func TestInvalidIPSet(t *testing.T) {
-	_, err := portforward.New(chain, "nonexistant", "nonexistant")
+	_, err := portforward.New(chainPrefix, "nonexistant", "nonexistant")
 	if err == nil {
 		t.Fatal("no error")
 	}
