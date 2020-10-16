@@ -22,8 +22,10 @@ script:
   # Build the project and run the tests
   - make
   # Set up iptables
-  - sudo iptables -t nat -N PORTFORWARDING
-  - sudo ip6tables -t nat -N PORTFORWARDING
+  - sudo iptables -t nat -N PORTFORWARDING_TCP
+  - sudo ip6tables -t nat -N PORTFORWARDING_TCP
+  - sudo iptables -t nat -N PORTFORWARDING_UDP
+  - sudo ip6tables -t nat -N PORTFORWARDING_UDP
   - sudo ipset create PORTFORWARDING_IPV4 hash:ip
   - sudo ipset create PORTFORWARDING_IPV6 hash:ip family inet6
   # Build the integration tests
