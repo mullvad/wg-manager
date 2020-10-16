@@ -13,7 +13,7 @@ import (
 )
 
 // Integration tests for portforwarding, not ran in short mode
-// Requires an iptables nat chain named PORTFORWARDING in both iptables and ip6tables
+// Requires iptables nat chains named PORTFORWARDING_TCP and PORTFORWARDING_UDP in both iptables and ip6tables
 
 var apiFixture = api.WireguardPeerList{
 	api.WireguardPeer{

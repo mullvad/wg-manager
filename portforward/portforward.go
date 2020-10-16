@@ -36,7 +36,7 @@ const table = "nat"
 // Transport protocols that we want to create chains for
 var transportProtocols = []string{"tcp", "udp"}
 
-// New validates the addresses, ensures that the iptables portforwarding chain exists, and returns a new Portforward instance
+// New validates the addresses, ensures that the iptables portforwarding chains exists, and returns a new Portforward instance
 func New(chainPrefix string, ipsetTableIPv4 string, ipsetTableIPv6 string) (*Portforward, error) {
 	var chains []Chain
 	for _, t := range transportProtocols {
