@@ -40,7 +40,7 @@ func main() {
 	password := flag.String("password", "", "api password")
 	hostname := flag.String("hostname", "", "server hostname")
 	interfaces := flag.String("interfaces", "wg0", "wireguard interfaces to configure. Pass a comma delimited list to configure multiple interfaces, eg 'wg0,wg1,wg2'")
-	portForwardingChainPrefix := flag.String("portforwarding-chain-prefix", "PORTFORWARDING", "iptables chain prefix to use for portforwarding, will create 'NAME_TCP' and 'NAME_UDP' chains")
+	portForwardingChainPrefix := flag.String("portforwarding-chain-prefix", "PORTFORWARDING", "iptables chain prefix to use for portforwarding")
 	portForwardingIpsetIPv4 := flag.String("portforwarding-ipset-ipv4", "PORTFORWARDING_IPV4", "ipset table to use for portforwarding for ipv4 addresses.")
 	portForwardingIpsetIPv6 := flag.String("portforwarding-ipset-ipv6", "PORTFORWARDING_IPV6", "ipset table to use for portforwarding for ipv6 addresses.")
 	statsdAddress := flag.String("statsd-address", "127.0.0.1:8125", "statsd address to send metrics to")
