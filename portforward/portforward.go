@@ -19,22 +19,39 @@ import (
 type Portforward struct {
 	iptables  *iptables.IPTables
 	ip6tables *iptables.IPTables
-	chain     string
+	chains    []Chain
 	ipsetIPv4 string
 	ipsetIPv6 string
+}
+
+// Chain contains a chain name and a transport protocol
+type Chain struct {
+	chain             string
+	transportProtocol string
 }
 
 // Iptables table to operate against
 const table = "nat"
 
+// Transport protocols that we want to create chains for
+var transportProtocols = []string{"tcp", "udp"}
+
 // New validates the addresses, ensures that the iptables portforwarding chain exists, and returns a new Portforward instance
-func New(chain string, ipsetTableIPv4 string, ipsetTableIPv6 string) (*Portforward, error) {
-	ipt, err := newIPTables(chain, iptables.ProtocolIPv4)
+func New(chainPrefix string, ipsetTableIPv4 string, ipsetTableIPv6 string) (*Portforward, error) {
+	var chains []Chain
+	for _, t := range transportProtocols {
+		chains = append(chains, Chain{
+			chain:             chainPrefix + "_" + strings.ToUpper(t),
+			transportProtocol: t,
+		})
+	}
+
+	ipt, err := newIPTables(chains, iptables.ProtocolIPv4)
 	if err != nil {
 		return nil, err
 	}
 
-	ip6t, err := newIPTables(chain, iptables.ProtocolIPv6)
+	ip6t, err := newIPTables(chains, iptables.ProtocolIPv6)
 	if err != nil {
 		return nil, err
 	}
@@ -52,44 +69,41 @@ func New(chain string, ipsetTableIPv4 string, ipsetTableIPv6 string) (*Portforwa
 	return &Portforward{
 		iptables:  ipt,
 		ip6tables: ip6t,
-		chain:     chain,
+		chains:    chains,
 		ipsetIPv4: ipsetTableIPv4,
 		ipsetIPv6: ipsetTableIPv6,
 	}, nil
 }
 
-func newIPTables(chain string, protocol iptables.Protocol) (*iptables.IPTables, error) {
+func newIPTables(chains []Chain, protocol iptables.Protocol) (*iptables.IPTables, error) {
 	ipt, err := iptables.NewWithProtocol(protocol)
 	if err != nil {
 		return nil, err
 	}
 
-	exists, err := chainExists(chain, ipt)
+	currentChains, err := ipt.ListChains("nat")
 	if err != nil {
 		return nil, err
 	}
 
-	if !exists {
-		return nil, fmt.Errorf("an iptables chain named %s does not exist", chain)
+	for _, c := range chains {
+		if !chainExists(c.chain, currentChains, ipt) {
+			return nil, fmt.Errorf("an iptables chain named %s does not exist", c)
+		}
 	}
 
 	return ipt, nil
 }
 
-func chainExists(chain string, ipt *iptables.IPTables) (bool, error) {
-	chains, err := ipt.ListChains("nat")
+func chainExists(chain string, currentChains []string, ipt *iptables.IPTables) bool {
 
-	if err != nil {
-		return false, err
-	}
-
-	for _, c := range chains {
+	for _, c := range currentChains {
 		if c == chain {
-			return true, nil
+			return true
 		}
 	}
 
-	return false, nil
+	return false
 }
 
 func validateIPSet(name string) error {
@@ -111,49 +125,53 @@ func validateIPSet(name string) error {
 
 // UpdatePortforwarding updates the iptables rules for portforwarding to match the given list of peers
 func (p *Portforward) UpdatePortforwarding(peers api.WireguardPeerList) {
-	rules := make(map[string]iptables.Protocol)
-	for _, peer := range peers {
-		if len(peer.Ports) < 1 {
-			continue
-		}
-
-		p.createPeerRules(peer, rules)
-	}
-
-	currentRules, err := p.getCurrentRules()
-	if err != nil {
-		log.Printf("error getting current iptables rules %s", err.Error())
-		return
-	}
-
-	// Add new portforwarding rules
-	for rule, protocol := range rules {
-		if _, ok := currentRules[rule]; !ok {
-			ipt := p.iptables
-			if protocol == iptables.ProtocolIPv6 {
-				ipt = p.ip6tables
-			}
-
-			err := ipt.Append(table, p.chain, strings.Split(rule, " ")...)
-			if err != nil {
-				log.Printf("error adding iptables rule")
+	for _, c := range p.chains {
+		rules := make(map[string]iptables.Protocol)
+		for _, peer := range peers {
+			if len(peer.Ports) < 1 {
 				continue
 			}
+
+			p.createPeerRules(peer, c.transportProtocol, rules)
 		}
-	}
 
-	// Remove old portforwarding rules
-	for rule, protocol := range currentRules {
-		if _, ok := rules[rule]; !ok {
-			ipt := p.iptables
-			if protocol == iptables.ProtocolIPv6 {
-				ipt = p.ip6tables
+		currentRules, err := p.getCurrentRules(c.chain)
+		if err != nil {
+			log.Printf("error getting current iptables rules %s", err.Error())
+			return
+		}
+
+		// Add new portforwarding rules
+		for rule, protocol := range rules {
+			if _, ok := currentRules[rule]; !ok {
+				ipt := p.iptables
+				if protocol == iptables.ProtocolIPv6 {
+					ipt = p.ip6tables
+				}
+
+				err := ipt.Append(table, c.chain, strings.Split(rule, " ")...)
+				if err != nil {
+					log.Printf("error adding iptables rule")
+					continue
+				}
+
 			}
+		}
 
-			err := ipt.Delete(table, p.chain, strings.Split(rule, " ")...)
-			if err != nil {
-				log.Printf("error deleting iptables rule")
-				continue
+		// Remove old portforwarding rules
+		for rule, protocol := range currentRules {
+			if _, ok := rules[rule]; !ok {
+				ipt := p.iptables
+				if protocol == iptables.ProtocolIPv6 {
+					ipt = p.ip6tables
+				}
+
+				err := ipt.Delete(table, c.chain, strings.Split(rule, " ")...)
+				if err != nil {
+					log.Printf("error deleting iptables rule")
+					continue
+				}
+
 			}
 		}
 	}
@@ -165,20 +183,22 @@ func (p *Portforward) AddPortforwarding(peer api.WireguardPeer) {
 		return
 	}
 
-	rules := make(map[string]iptables.Protocol)
-	p.createPeerRules(peer, rules)
+	for _, c := range p.chains {
+		rules := make(map[string]iptables.Protocol)
+		p.createPeerRules(peer, c.transportProtocol, rules)
 
-	// Add new portforwarding rules
-	for rule, protocol := range rules {
-		ipt := p.iptables
-		if protocol == iptables.ProtocolIPv6 {
-			ipt = p.ip6tables
-		}
+		// Add new portforwarding rules
+		for rule, protocol := range rules {
+			ipt := p.iptables
+			if protocol == iptables.ProtocolIPv6 {
+				ipt = p.ip6tables
+			}
 
-		err := ipt.Append(table, p.chain, strings.Split(rule, " ")...)
-		if err != nil {
-			log.Printf("error adding iptables rule")
-			continue
+			err := ipt.Append(table, c.chain, strings.Split(rule, " ")...)
+			if err != nil {
+				log.Printf("error adding iptables rule")
+				continue
+			}
 		}
 	}
 
@@ -191,45 +211,43 @@ func (p *Portforward) RemovePortforwarding(peer api.WireguardPeer) {
 		return
 	}
 
-	rules := make(map[string]iptables.Protocol)
-	p.createPeerRules(peer, rules)
+	for _, c := range p.chains {
+		rules := make(map[string]iptables.Protocol)
+		p.createPeerRules(peer, c.transportProtocol, rules)
 
-	// Remove old portforwarding rules
-	for rule, protocol := range rules {
-		ipt := p.iptables
-		if protocol == iptables.ProtocolIPv6 {
-			ipt = p.ip6tables
-		}
+		// Remove old portforwarding rules
+		for rule, protocol := range rules {
+			ipt := p.iptables
+			if protocol == iptables.ProtocolIPv6 {
+				ipt = p.ip6tables
+			}
 
-		err := ipt.Delete(table, p.chain, strings.Split(rule, " ")...)
-		if err != nil {
-			log.Printf("error deleting iptables rule")
-			continue
+			err := ipt.Delete(table, c.chain, strings.Split(rule, " ")...)
+			if err != nil {
+				log.Printf("error deleting iptables rule")
+				continue
+			}
 		}
 	}
 }
 
-func (p *Portforward) createPeerRules(peer api.WireguardPeer, rules map[string]iptables.Protocol) {
+func (p *Portforward) createPeerRules(peer api.WireguardPeer, transportProtocol string, rules map[string]iptables.Protocol) {
 	// Ignore ip's with errors, in-case we get bad data from the API
 	ipv4, _, err := net.ParseCIDR(peer.IPv4)
 	if err != nil {
 		return
 	}
 
-	tcpRule := fmt.Sprintf("-p tcp -m set --match-set %s dst -m multiport --dports %s -j DNAT --to-destination %s", p.ipsetIPv4, getPortsString(peer.Ports), ipv4)
-	udpRule := fmt.Sprintf("-p udp -m set --match-set %s dst -m multiport --dports %s -j DNAT --to-destination %s", p.ipsetIPv4, getPortsString(peer.Ports), ipv4)
-	rules[tcpRule] = iptables.ProtocolIPv4
-	rules[udpRule] = iptables.ProtocolIPv4
+	rule := fmt.Sprintf("-p %s -m set --match-set %s dst -m multiport --dports %s -j DNAT --to-destination %s", transportProtocol, p.ipsetIPv4, getPortsString(peer.Ports), ipv4)
+	rules[rule] = iptables.ProtocolIPv4
 
 	ipv6, _, err := net.ParseCIDR(peer.IPv6)
 	if err != nil {
 		return
 	}
 
-	tcpRule = fmt.Sprintf("-p tcp -m set --match-set %s dst -m multiport --dports %s -j DNAT --to-destination %s", p.ipsetIPv6, getPortsString(peer.Ports), ipv6)
-	udpRule = fmt.Sprintf("-p udp -m set --match-set %s dst -m multiport --dports %s -j DNAT --to-destination %s", p.ipsetIPv6, getPortsString(peer.Ports), ipv6)
-	rules[tcpRule] = iptables.ProtocolIPv6
-	rules[udpRule] = iptables.ProtocolIPv6
+	rule = fmt.Sprintf("-p %s -m set --match-set %s dst -m multiport --dports %s -j DNAT --to-destination %s", transportProtocol, p.ipsetIPv6, getPortsString(peer.Ports), ipv6)
+	rules[rule] = iptables.ProtocolIPv6
 }
 
 func getPortsString(ports []int) string {
@@ -243,31 +261,31 @@ func getPortsString(ports []int) string {
 	return strings.Join(slice, ",")
 }
 
-func (p *Portforward) getCurrentRules() (map[string]iptables.Protocol, error) {
+func (p *Portforward) getCurrentRules(chain string) (map[string]iptables.Protocol, error) {
 	rules := make(map[string]iptables.Protocol)
 
-	ipv4Rules, err := p.iptables.List("nat", p.chain)
+	ipv4Rules, err := p.iptables.List("nat", chain)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, rule := range p.filterRules(ipv4Rules) {
+	ipv6Rules, err := p.ip6tables.List("nat", chain)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, rule := range p.filterRules(chain, ipv4Rules) {
 		rules[rule] = iptables.ProtocolIPv4
 	}
 
-	ipv6Rules, err := p.ip6tables.List("nat", p.chain)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, rule := range p.filterRules(ipv6Rules) {
+	for _, rule := range p.filterRules(chain, ipv6Rules) {
 		rules[rule] = iptables.ProtocolIPv6
 	}
 
 	return rules, nil
 }
 
-func (p *Portforward) filterRules(rules []string) []string {
+func (p *Portforward) filterRules(chain string, rules []string) []string {
 	// Remove the first entry as it's the rule for creating the chain
 	if len(rules) > 0 {
 		rules = rules[1:]
@@ -276,8 +294,7 @@ func (p *Portforward) filterRules(rules []string) []string {
 	var filteredRules []string
 	for _, rule := range rules {
 		// Remove the chain name
-		rule = strings.TrimPrefix(rule, fmt.Sprintf("-A %s ", p.chain))
-
+		rule = strings.TrimPrefix(rule, fmt.Sprintf("-A %s ", chain))
 		// Remove the ip masks
 		rule = strings.Replace(rule, "/32", "", -1)
 		rule = strings.Replace(rule, "/128", "", -1)
