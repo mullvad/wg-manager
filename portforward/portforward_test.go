@@ -31,6 +31,11 @@ var rulesFixture = []string{
 	"-A PORTFORWARDING_UDP -p udp -m set --match-set PORTFORWARDING_IPV6 dst -m multiport --dports 1234,4321 -j DNAT --to-destination fc00:bbbb:bbbb:bb01::1",
 }
 
+var chains = []string{
+	"PORTFORWARDING_TCP",
+	"PORTFORWARDING_UDP",
+}
+
 const (
 	chainPrefix = "PORTFORWARDING"
 	ipsetIPv4   = "PORTFORWARDING_IPV4"
@@ -96,9 +101,8 @@ func getRules(t *testing.T, ipts []*iptables.IPTables) []string {
 
 	rules := []string{}
 	for _, ipt := range ipts {
-		// TODO: Find less ugly solution for this!
-		for _, c := range []string{chainPrefix + "_" + "TCP", chainPrefix + "_" + "UDP"} {
-			listRules, err := ipt.List(table, c)
+		for _, chain := range chains {
+			listRules, err := ipt.List(table, chain)
 			if err != nil {
 				t.Fatal(err)
 			}
