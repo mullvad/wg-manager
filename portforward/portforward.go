@@ -26,7 +26,7 @@ type Portforward struct {
 
 // Chain contains a chain name and a transport protocol
 type Chain struct {
-	chain             string
+	name              string
 	transportProtocol string
 }
 
@@ -39,10 +39,10 @@ var transportProtocols = []string{"tcp", "udp"}
 // New validates the addresses, ensures that the iptables portforwarding chains exists, and returns a new Portforward instance
 func New(chainPrefix string, ipsetTableIPv4 string, ipsetTableIPv6 string) (*Portforward, error) {
 	var chains []Chain
-	for _, t := range transportProtocols {
+	for _, transportProtocol := range transportProtocols {
 		chains = append(chains, Chain{
-			chain:             chainPrefix + "_" + strings.ToUpper(t),
-			transportProtocol: t,
+			name:              chainPrefix + "_" + strings.ToUpper(transportProtocol),
+			transportProtocol: transportProtocol,
 		})
 	}
 
@@ -86,9 +86,9 @@ func newIPTables(chains []Chain, protocol iptables.Protocol) (*iptables.IPTables
 		return nil, err
 	}
 
-	for _, c := range chains {
-		if !chainExists(c.chain, currentChains, ipt) {
-			return nil, fmt.Errorf("an iptables chain named %s does not exist", c)
+	for _, chain := range chains {
+		if !chainExists(chain.name, currentChains, ipt) {
+			return nil, fmt.Errorf("an iptables chain named %s does not exist", chain)
 		}
 	}
 
@@ -97,8 +97,8 @@ func newIPTables(chains []Chain, protocol iptables.Protocol) (*iptables.IPTables
 
 func chainExists(chain string, currentChains []string, ipt *iptables.IPTables) bool {
 
-	for _, c := range currentChains {
-		if c == chain {
+	for _, currentChain := range currentChains {
+		if currentChain == chain {
 			return true
 		}
 	}
@@ -125,17 +125,17 @@ func validateIPSet(name string) error {
 
 // UpdatePortforwarding updates the iptables rules for portforwarding to match the given list of peers
 func (p *Portforward) UpdatePortforwarding(peers api.WireguardPeerList) {
-	for _, c := range p.chains {
+	for _, chain := range p.chains {
 		rules := make(map[string]iptables.Protocol)
 		for _, peer := range peers {
 			if len(peer.Ports) < 1 {
 				continue
 			}
 
-			p.createPeerRules(peer, c.transportProtocol, rules)
+			p.createPeerRules(peer, chain.transportProtocol, rules)
 		}
 
-		currentRules, err := p.getCurrentRules(c.chain)
+		currentRules, err := p.getCurrentRules(chain.name)
 		if err != nil {
 			log.Printf("error getting current iptables rules %s", err.Error())
 			return
@@ -149,7 +149,7 @@ func (p *Portforward) UpdatePortforwarding(peers api.WireguardPeerList) {
 					ipt = p.ip6tables
 				}
 
-				err := ipt.Append(table, c.chain, strings.Split(rule, " ")...)
+				err := ipt.Append(table, chain.name, strings.Split(rule, " ")...)
 				if err != nil {
 					log.Printf("error adding iptables rule")
 					continue
@@ -166,7 +166,7 @@ func (p *Portforward) UpdatePortforwarding(peers api.WireguardPeerList) {
 					ipt = p.ip6tables
 				}
 
-				err := ipt.Delete(table, c.chain, strings.Split(rule, " ")...)
+				err := ipt.Delete(table, chain.name, strings.Split(rule, " ")...)
 				if err != nil {
 					log.Printf("error deleting iptables rule")
 					continue
@@ -183,9 +183,9 @@ func (p *Portforward) AddPortforwarding(peer api.WireguardPeer) {
 		return
 	}
 
-	for _, c := range p.chains {
+	for _, chain := range p.chains {
 		rules := make(map[string]iptables.Protocol)
-		p.createPeerRules(peer, c.transportProtocol, rules)
+		p.createPeerRules(peer, chain.transportProtocol, rules)
 
 		// Add new portforwarding rules
 		for rule, protocol := range rules {
@@ -194,7 +194,7 @@ func (p *Portforward) AddPortforwarding(peer api.WireguardPeer) {
 				ipt = p.ip6tables
 			}
 
-			err := ipt.Append(table, c.chain, strings.Split(rule, " ")...)
+			err := ipt.Append(table, chain.name, strings.Split(rule, " ")...)
 			if err != nil {
 				log.Printf("error adding iptables rule")
 				continue
@@ -211,9 +211,9 @@ func (p *Portforward) RemovePortforwarding(peer api.WireguardPeer) {
 		return
 	}
 
-	for _, c := range p.chains {
+	for _, chain := range p.chains {
 		rules := make(map[string]iptables.Protocol)
-		p.createPeerRules(peer, c.transportProtocol, rules)
+		p.createPeerRules(peer, chain.transportProtocol, rules)
 
 		// Remove old portforwarding rules
 		for rule, protocol := range rules {
@@ -222,7 +222,7 @@ func (p *Portforward) RemovePortforwarding(peer api.WireguardPeer) {
 				ipt = p.ip6tables
 			}
 
-			err := ipt.Delete(table, c.chain, strings.Split(rule, " ")...)
+			err := ipt.Delete(table, chain.name, strings.Split(rule, " ")...)
 			if err != nil {
 				log.Printf("error deleting iptables rule")
 				continue
