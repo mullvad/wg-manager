@@ -12,7 +12,6 @@ addons:
       - ipset
       - wireguard
 script:
-  - sudo apt-get -y install linux-headers-$(uname -r)
   - sudo ip link add wg0 type wireguard
   - sudo ip link add wg1 type wireguard
   - sudo ip link set up wg0
