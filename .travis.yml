@@ -8,7 +8,7 @@ env:
 - GO111MODULE=on
 addons:
   apt:
-    package:
+    packages:
       - ipset
       - wireguard
 script:
