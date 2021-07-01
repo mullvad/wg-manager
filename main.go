@@ -170,8 +170,8 @@ func main() {
 	select {
 	case <-finished:
 	case <-time.After(5 * time.Second):
-		log.Println("max wait time reached")
-		os.Exit(1)
+		log.Println("max wait time reached, forced exit")
+		// os.Exit(1) // Optionally we could have an exit code here, but this won't run the defers (that needs a workaround)
 	}
 }
 
