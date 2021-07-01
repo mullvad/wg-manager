@@ -82,7 +82,7 @@ func (s *Subscriber) read(ctx context.Context) {
 
 			// Start attempting to reconnect
 			err = s.reconnect(ctx)
-			if err != nil { // Reconnect failed which is a context cancel/timeout here
+			if err != nil { // Reconnect failed (context closed)
 				close(s.eventCh)
 				return
 			}
@@ -94,6 +94,7 @@ func (s *Subscriber) read(ctx context.Context) {
 	}
 }
 
+// reconnect try to init a new connection unless the context is closed
 func (s *Subscriber) reconnect(ctx context.Context) error {
 	ticker := time.NewTicker(1 * time.Second)
 
