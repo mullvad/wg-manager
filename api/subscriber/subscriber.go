@@ -20,6 +20,9 @@ type Subscriber struct {
 	BaseURL  string
 	Channel  string
 	Metrics  *statsd.Client
+
+	conn    *websocket.Conn
+	eventCh chan WireguardEvent
 }
 
 // WireguardEvent is a wireguard key event
@@ -31,17 +34,21 @@ type WireguardEvent struct {
 const subProtocol = "message-queue-v1"
 
 // Subscribe establishes a websocket connection for a message-queue channel, and emits messages on the given channel
-func (s *Subscriber) Subscribe(ctx context.Context, channel chan<- WireguardEvent) error {
-	err := s.connect(ctx, channel)
+func (s *Subscriber) Subscribe(ctx context.Context) (chan WireguardEvent, error) {
+	s.eventCh = make(chan WireguardEvent, 1024)
+
+	err := s.connect(ctx)
 
 	if err != nil {
-		return err
+		return s.eventCh, err
 	}
 
-	return nil
+	go s.read(ctx)
+
+	return s.eventCh, nil
 }
 
-func (s *Subscriber) connect(ctx context.Context, channel chan<- WireguardEvent) error {
+func (s *Subscriber) connect(ctx context.Context) error {
 	header := http.Header{}
 
 	if s.Username != "" && s.Password != "" {
@@ -57,43 +64,49 @@ func (s *Subscriber) connect(ctx context.Context, channel chan<- WireguardEvent)
 		return err
 	}
 
-	go s.read(ctx, channel, conn)
+	s.conn = conn
 
 	return nil
 }
 
-func (s *Subscriber) read(ctx context.Context, channel chan<- WireguardEvent, conn *websocket.Conn) {
+func (s *Subscriber) read(ctx context.Context) {
 	for {
 		v := WireguardEvent{}
-		err := wsjson.Read(ctx, conn, &v)
+		err := wsjson.Read(ctx, s.conn, &v)
 		if err != nil {
 			log.Println("error reading from websocket, reconnecting", err)
 			s.Metrics.Increment("websocket_error")
 
 			// Make sure the connection is closed
-			conn.Close(websocket.StatusInternalError, "")
+			s.conn.Close(websocket.StatusInternalError, "")
 
 			// Start attempting to reconnect
-			go s.reconnect(ctx, channel)
+			err = s.reconnect(ctx)
+			if err != nil { // Reconnect failed which is a context cancel/timeout here
+				close(s.eventCh)
+				return
+			}
 
-			return
+			continue
 		}
 
-		channel <- v
+		s.eventCh <- v
 	}
 }
 
-func (s *Subscriber) reconnect(ctx context.Context, channel chan<- WireguardEvent) {
-	// Sleep
-	time.Sleep(time.Second)
+func (s *Subscriber) reconnect(ctx context.Context) error {
+	ticker := time.NewTicker(1 * time.Second)
 
-	// Attempt to create a new connection
-	err := s.connect(ctx, channel)
-	if err != nil {
-		s.Metrics.Increment("websocket_reconnect_error")
-		go s.reconnect(ctx, channel)
-	} else {
-		log.Println("successfully reconnected to websocket")
-		s.Metrics.Increment("websocket_reconnect_success")
+	var err error
+	for {
+		select {
+		case <-ticker.C:
+			err = s.connect(ctx)
+			if err == nil {
+				return nil
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 }
