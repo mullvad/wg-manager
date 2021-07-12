@@ -3,9 +3,9 @@ module github.com/mullvad/wg-manager
 go 1.15
 
 require (
-	github.com/DMarby/jitter v0.0.0-20190312004500-d77fd504dcfa
 	github.com/coreos/go-iptables v0.6.0
 	github.com/digineo/go-ipset/v2 v2.2.1
+	github.com/gerifield/jitter v0.0.0-20210712212738-f4d51d839797
 	github.com/google/go-cmp v0.5.5
 	github.com/infosum/statsd v2.1.2+incompatible
 	github.com/jamiealquiza/envy v1.1.0

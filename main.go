@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -13,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/DMarby/jitter"
+	"github.com/gerifield/jitter"
 	"github.com/infosum/statsd"
 	"github.com/jamiealquiza/envy"
 	"github.com/mullvad/wg-manager/api"
@@ -111,15 +110,14 @@ func main() {
 		log.Fatalf("error initializing portforwarding %s", err)
 	}
 
-	// Set up context for shutting down
-	shutdownCtx, shutdown := context.WithCancel(context.Background())
-	defer shutdown()
-
 	// Run an initial synchronization
 	synchronize()
 
 	// Run an initial count of peers
 	countPeers()
+
+	// Set up context for shutting down
+	shutdownCtx, shutdown := context.WithCancel(context.Background())
 
 	// Set up a connection to receive add/remove events
 	s := subscriber.Subscriber{
@@ -129,10 +127,8 @@ func main() {
 		Channel:  *mqChannel,
 		Metrics:  metrics,
 	}
-	eventChannel := make(chan subscriber.WireguardEvent, 1024)
-	defer close(eventChannel)
 
-	err = s.Subscribe(shutdownCtx, eventChannel)
+	eventChannel, err := s.Subscribe(shutdownCtx)
 	if err != nil {
 		log.Fatal("error connecting to message-queue", err)
 	}
@@ -141,7 +137,10 @@ func main() {
 	countPeersTicker := jitter.NewTicker(*countPeerInterval, time.Microsecond)
 	synchronizationTicker := jitter.NewTicker(*synchronizationInterval, *delay)
 	resetHandshakeTicker := jitter.NewTicker(*resetHandshakeInterval, time.Microsecond)
+	finished := make(chan struct{})
 	go func() {
+		defer close(finished)
+
 		for {
 			select {
 			case msg := <-eventChannel:
@@ -165,8 +164,14 @@ func main() {
 	}()
 
 	// Wait for shutdown or error
-	err = waitForInterrupt(shutdownCtx)
-	log.Printf("shutting down: %s", err)
+	waitForInterrupt(shutdown)
+
+	log.Println("shutting down, wait for graceful shutdown")
+	select {
+	case <-finished:
+	case <-time.After(5 * time.Second):
+		log.Println("max wait time reached, forced exit")
+	}
 }
 
 func handleEvent(event subscriber.WireguardEvent) {
@@ -237,13 +242,9 @@ func resetHandshake() {
 	wg.ResetPeers()
 }
 
-func waitForInterrupt(ctx context.Context) error {
+func waitForInterrupt(cancel context.CancelFunc) {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, syscall.SIGINT, syscall.SIGTERM)
-	select {
-	case sig := <-c:
-		return fmt.Errorf("received signal %s", sig)
-	case <-ctx.Done():
-		return errors.New("canceled")
-	}
+	<-c
+	cancel()
 }
