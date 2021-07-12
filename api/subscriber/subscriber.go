@@ -104,8 +104,11 @@ func (s *Subscriber) reconnect(ctx context.Context) error {
 		case <-ticker.C:
 			err = s.connect(ctx)
 			if err == nil {
+				log.Println("successfully reconnected to websocket")
+				s.Metrics.Increment("websocket_reconnect_success")
 				return nil
 			}
+			s.Metrics.Increment("websocket_reconnect_error")
 		case <-ctx.Done():
 			return ctx.Err()
 		}
