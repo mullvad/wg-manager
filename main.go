@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/DMarby/jitter"
+	"github.com/gerifield/jitter"
 	"github.com/infosum/statsd"
 	"github.com/jamiealquiza/envy"
 	"github.com/mullvad/wg-manager/api"
@@ -171,7 +171,6 @@ func main() {
 	case <-finished:
 	case <-time.After(5 * time.Second):
 		log.Println("max wait time reached, forced exit")
-		// os.Exit(1) // Optionally we could have an exit code here, but this won't run the defers (that needs a workaround)
 	}
 }
 
